@@ -842,8 +842,8 @@ class ApplyTypeAnnotationsVisitor(ContextAwareTransformer):
                 AddImportsVisitor.add_needed_import(
                     self.context, "__future__", "annotations"
                 )
-            tree_with_imports = AddImportsVisitor(self.context).transform_module(tree)
 
+        tree_with_imports = AddImportsVisitor(self.context).transform_module(tree)
         tree_with_changes = tree_with_imports.visit(self)
 
         # don't modify the imports if we didn't actually add any type information
