@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from collections import defaultdict
+import textwrap
 from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
 import itertools
 
