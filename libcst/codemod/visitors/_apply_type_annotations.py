@@ -6,6 +6,7 @@
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
+import functools
 
 import libcst as cst
 import libcst.matchers as m
@@ -723,6 +724,7 @@ class ApplyTypeAnnotationsVisitor(ContextAwareTransformer):
         strict_annotation_matching: bool = False,
         always_qualify_annotations: bool = False,
         handle_function_bodies: bool = False,
+        create_class_attributes: bool = False,
     ) -> None:
         super().__init__(context)
         # Qualifier for storing the canonical name of the current function.
@@ -738,6 +740,7 @@ class ApplyTypeAnnotationsVisitor(ContextAwareTransformer):
         self.strict_annotation_matching = strict_annotation_matching
         self.always_qualify_annotations = always_qualify_annotations
         self.handle_function_bodies = handle_function_bodies
+        self.create_class_attributes = create_class_attributes
 
         # We use this to determine the end of the import block so that we can
         # insert top-level annotations.
@@ -984,6 +987,19 @@ class ApplyTypeAnnotationsVisitor(ContextAwareTransformer):
         return function_def.with_changes(
             returns=self._quote_future_annotations(annotation),
         )
+
+    def _add_annotated_attr_to_class_body(
+        self,
+        body: cst.BaseSuite,
+        hint: cst.SimpleStatementLine,
+    ) -> cst.BaseSuite:
+        for member in body.body:
+            if m.matches(member, m.SimpleStatementLine(body=[m.AnnAssign(value=hint.body[0].value)])):
+                if self.overwrite_existing_annotations:
+                    member = member.with_changes(body=[hint])
+                return body
+
+        return body.with_changes(body=(hint, *body.body))
 
     # private methods used in the visit and leave methods
 
@@ -1236,7 +1252,21 @@ class ApplyTypeAnnotationsVisitor(ContextAwareTransformer):
             if b1 and not b2:
                 new_bases = list(updated_node.bases) + [b1]
                 self.annotation_counts.typevars_and_generics_added += 1
-                return updated_node.with_changes(bases=new_bases)
+                updated_node = updated_node.with_changes(bases=new_bases)
+
+            if self.create_class_attributes:
+                hint_matcher = m.SimpleStatementLine(body=[m.AnnAssign()])
+                hints = filter(
+                    lambda attr: m.matches(attr, hint_matcher),
+                    (line for block in definition.body for line in block.body),
+                )
+
+                updated_node = updated_node.with_changes(
+                    body=functools.reduce(
+                        self._add_annotated_attr_to_class_body, hints, updated_node.body
+                    )
+                )
+
         return updated_node
 
     def visit_FunctionDef(
