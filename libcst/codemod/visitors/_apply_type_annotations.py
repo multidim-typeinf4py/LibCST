@@ -722,6 +722,7 @@ class ApplyTypeAnnotationsVisitor(ContextAwareTransformer):
         strict_posargs_matching: bool = True,
         strict_annotation_matching: bool = False,
         always_qualify_annotations: bool = False,
+        handle_function_bodies: bool = False,
     ) -> None:
         super().__init__(context)
         # Qualifier for storing the canonical name of the current function.
@@ -736,6 +737,7 @@ class ApplyTypeAnnotationsVisitor(ContextAwareTransformer):
         self.strict_posargs_matching = strict_posargs_matching
         self.strict_annotation_matching = strict_annotation_matching
         self.always_qualify_annotations = always_qualify_annotations
+        self.handle_function_bodies = handle_function_bodies
 
         # We use this to determine the end of the import block so that we can
         # insert top-level annotations.
@@ -1242,8 +1244,7 @@ class ApplyTypeAnnotationsVisitor(ContextAwareTransformer):
         node: cst.FunctionDef,
     ) -> bool:
         self.qualifier.append(node.name.value)
-        # pyi files don't support inner functions, return False to stop the traversal.
-        return False
+        return self.handle_function_bodies
 
     def leave_FunctionDef(
         self,
