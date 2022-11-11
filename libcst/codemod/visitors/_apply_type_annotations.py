@@ -1258,7 +1258,7 @@ class ApplyTypeAnnotationsVisitor(ContextAwareTransformer):
                 hint_matcher = m.SimpleStatementLine(body=[m.AnnAssign()])
                 hints = filter(
                     lambda attr: m.matches(attr, hint_matcher),
-                    (line for block in definition.body for line in block.body),
+                    (line for line in definition.body.body),
                 )
 
                 updated_node = updated_node.with_changes(
