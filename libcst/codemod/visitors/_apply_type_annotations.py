@@ -365,6 +365,8 @@ class TypeCollector(m.MatcherDecoratableVisitor):
         existing_imports: Set[str],
         module_imports: Dict[str, ImportItem],
         context: CodemodContext,
+        handle_function_bodies: bool = False,
+        create_class_attributes: bool = False,
     ) -> None:
         super().__init__()
         self.context = context
@@ -383,6 +385,11 @@ class TypeCollector(m.MatcherDecoratableVisitor):
         self.current_assign: Optional[cst.Assign] = None  # used to collect typevars
         # Store the annotations.
         self.annotations = Annotations.empty()
+
+        self.handle_function_bodies = handle_function_bodies
+        self.create_class_attributes = create_class_attributes
+
+
 
     def visit_ClassDef(
         self,
@@ -405,8 +412,23 @@ class TypeCollector(m.MatcherDecoratableVisitor):
                 )
             new_bases.append(base.with_changes(value=new_value))
 
+        if self.create_class_attributes:
+            matcher = m.AnnAssign(
+                target=m.Name(),
+                annotation=m.Annotation(),
+                value=None
+            )
+            hints: list[cst.AnnAssign] = [
+                attribute for attribute in node.body.body if m.matches(attribute, matcher)
+            ]
+
+        else:
+            hints = []
+
+        hints_as_stmts = [cst.SimpleStatementLine(body=[hint]) for hint in hints]
         self.annotations.class_definitions[node.name.value] = node.with_changes(
-            bases=new_bases
+            bases=new_bases,
+            body=cst.IndentedBlock(body=hints_as_stmts)
         )
 
     def leave_ClassDef(
@@ -432,7 +454,7 @@ class TypeCollector(m.MatcherDecoratableVisitor):
         )
 
         # pyi files don't support inner functions, return False to stop the traversal.
-        return False
+        return self.handle_function_bodies
 
     def leave_FunctionDef(
         self,
