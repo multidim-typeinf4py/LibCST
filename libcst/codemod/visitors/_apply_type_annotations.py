@@ -420,7 +420,7 @@ class TypeCollector(m.MatcherDecoratableVisitor):
                 ]
             )
             hints: list[cst.AnnAssign] = [
-                ssl.body[0]
+                ssl
                 for ssl in node.body.body
                 if m.matches(ssl, matcher)
             ]
@@ -428,9 +428,8 @@ class TypeCollector(m.MatcherDecoratableVisitor):
         else:
             hints = []
 
-        hints_as_stmts = [cst.SimpleStatementLine(body=[hint]) for hint in hints]
         self.annotations.class_definitions[node.name.value] = node.with_changes(
-            bases=new_bases, body=cst.IndentedBlock(body=hints_as_stmts)
+            bases=new_bases, body=cst.IndentedBlock(body=hints)
         )
 
     def leave_ClassDef(
@@ -488,7 +487,7 @@ class TypeCollector(m.MatcherDecoratableVisitor):
         self.current_assign = node
 
         if self.track_unannotated and len(node.targets) == 1:
-            name = get_full_name_for_node(node.targets[0])
+            name = get_full_name_for_node(node.targets[0].target)
             if name is not None:
                 self.qualifier.append(name)
             # annotation_value = self._handle_Annotation(annotation=node.annotation)
@@ -499,6 +498,7 @@ class TypeCollector(m.MatcherDecoratableVisitor):
         original_node: cst.Assign,
     ) -> None:
         self.current_assign = None
+        self.qualifier.pop()
 
     @m.call_if_inside(m.Assign())
     @m.visit(m.Call(func=m.Name("TypeVar")))
