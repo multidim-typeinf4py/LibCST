@@ -367,6 +367,7 @@ class TypeCollector(m.MatcherDecoratableVisitor):
         context: CodemodContext,
         handle_function_bodies: bool = False,
         create_class_attributes: bool = False,
+        track_unannotated: bool = False,
     ) -> None:
         super().__init__()
         self.context = context
@@ -388,8 +389,7 @@ class TypeCollector(m.MatcherDecoratableVisitor):
 
         self.handle_function_bodies = handle_function_bodies
         self.create_class_attributes = create_class_attributes
-
-
+        self.track_unannotated = track_unannotated
 
     def visit_ClassDef(
         self,
@@ -413,13 +413,16 @@ class TypeCollector(m.MatcherDecoratableVisitor):
             new_bases.append(base.with_changes(value=new_value))
 
         if self.create_class_attributes:
-            matcher = m.AnnAssign(
-                target=m.Name(),
-                annotation=m.Annotation(),
-                value=None
+            # Match exactly one AnnAssign per line without a value
+            matcher = m.SimpleStatementLine(
+                body=[
+                    m.AnnAssign(target=m.Name(), annotation=m.Annotation(), value=None)
+                ]
             )
             hints: list[cst.AnnAssign] = [
-                attribute for attribute in node.body.body if m.matches(attribute, matcher)
+                ssl.body[0]
+                for ssl in node.body.body
+                if m.matches(ssl, matcher)
             ]
 
         else:
@@ -427,8 +430,7 @@ class TypeCollector(m.MatcherDecoratableVisitor):
 
         hints_as_stmts = [cst.SimpleStatementLine(body=[hint]) for hint in hints]
         self.annotations.class_definitions[node.name.value] = node.with_changes(
-            bases=new_bases,
-            body=cst.IndentedBlock(body=hints_as_stmts)
+            bases=new_bases, body=cst.IndentedBlock(body=hints_as_stmts)
         )
 
     def leave_ClassDef(
@@ -484,6 +486,13 @@ class TypeCollector(m.MatcherDecoratableVisitor):
         node: cst.Assign,
     ) -> None:
         self.current_assign = node
+
+        if self.track_unannotated and len(node.targets) == 1:
+            name = get_full_name_for_node(node.targets[0])
+            if name is not None:
+                self.qualifier.append(name)
+            # annotation_value = self._handle_Annotation(annotation=node.annotation)
+            self.annotations.attributes[".".join(self.qualifier)] = None
 
     def leave_Assign(
         self,
@@ -1016,7 +1025,10 @@ class ApplyTypeAnnotationsVisitor(ContextAwareTransformer):
         hint: cst.SimpleStatementLine,
     ) -> cst.BaseSuite:
         for member in body.body:
-            if m.matches(member, m.SimpleStatementLine(body=[m.AnnAssign(value=hint.body[0].value)])):
+            if m.matches(
+                member,
+                m.SimpleStatementLine(body=[m.AnnAssign(value=hint.body[0].value)]),
+            ):
                 if self.overwrite_existing_annotations:
                     member = member.with_changes(body=[hint])
                 return body
