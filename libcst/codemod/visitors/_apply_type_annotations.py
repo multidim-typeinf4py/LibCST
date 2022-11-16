@@ -365,6 +365,9 @@ class TypeCollector(m.MatcherDecoratableVisitor):
         existing_imports: Set[str],
         module_imports: Dict[str, ImportItem],
         context: CodemodContext,
+        handle_function_bodies: bool = False,
+        create_class_attributes: bool = False,
+        track_unannotated: bool = False,
     ) -> None:
         super().__init__()
         self.context = context
@@ -383,6 +386,10 @@ class TypeCollector(m.MatcherDecoratableVisitor):
         self.current_assign: Optional[cst.Assign] = None  # used to collect typevars
         # Store the annotations.
         self.annotations = Annotations.empty()
+
+        self.handle_function_bodies = handle_function_bodies
+        self.create_class_attributes = create_class_attributes
+        self.track_unannotated = track_unannotated
 
     def visit_ClassDef(
         self,
@@ -405,8 +412,24 @@ class TypeCollector(m.MatcherDecoratableVisitor):
                 )
             new_bases.append(base.with_changes(value=new_value))
 
+        if self.create_class_attributes:
+            # Match exactly one AnnAssign per line without a value
+            matcher = m.SimpleStatementLine(
+                body=[
+                    m.AnnAssign(target=m.Name(), annotation=m.Annotation(), value=None)
+                ]
+            )
+            hints: list[cst.AnnAssign] = [
+                ssl
+                for ssl in node.body.body
+                if m.matches(ssl, matcher)
+            ]
+
+        else:
+            hints = []
+
         self.annotations.class_definitions[node.name.value] = node.with_changes(
-            bases=new_bases
+            bases=new_bases, body=cst.IndentedBlock(body=hints)
         )
 
     def leave_ClassDef(
@@ -432,7 +455,7 @@ class TypeCollector(m.MatcherDecoratableVisitor):
         )
 
         # pyi files don't support inner functions, return False to stop the traversal.
-        return False
+        return self.handle_function_bodies
 
     def leave_FunctionDef(
         self,
@@ -463,11 +486,19 @@ class TypeCollector(m.MatcherDecoratableVisitor):
     ) -> None:
         self.current_assign = node
 
+        if self.track_unannotated and len(node.targets) == 1:
+            name = get_full_name_for_node(node.targets[0].target)
+            if name is not None:
+                self.qualifier.append(name)
+            # annotation_value = self._handle_Annotation(annotation=node.annotation)
+            self.annotations.attributes[".".join(self.qualifier)] = None
+
     def leave_Assign(
         self,
         original_node: cst.Assign,
     ) -> None:
         self.current_assign = None
+        self.qualifier.pop()
 
     @m.call_if_inside(m.Assign())
     @m.visit(m.Call(func=m.Name("TypeVar")))
@@ -994,7 +1025,10 @@ class ApplyTypeAnnotationsVisitor(ContextAwareTransformer):
         hint: cst.SimpleStatementLine,
     ) -> cst.BaseSuite:
         for member in body.body:
-            if m.matches(member, m.SimpleStatementLine(body=[m.AnnAssign(value=hint.body[0].value)])):
+            if m.matches(
+                member,
+                m.SimpleStatementLine(body=[m.AnnAssign(value=hint.body[0].value)]),
+            ):
                 if self.overwrite_existing_annotations:
                     member = member.with_changes(body=[hint])
                 return body
