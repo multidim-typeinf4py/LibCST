@@ -993,8 +993,9 @@ class ApplyTypeAnnotationsVisitor(ContextAwareTransformer):
             self.annotation_counts.global_annotations += 1
         else:
             self.annotation_counts.attribute_annotations += 1
+
         return cst.AnnAssign(
-            cst.Name(name),
+            cst.parse_expression(name),
             self._quote_future_annotations(annotation),
             value,
         )
@@ -1022,18 +1023,18 @@ class ApplyTypeAnnotationsVisitor(ContextAwareTransformer):
     def _add_annotated_attr_to_class_body(
         self,
         body: cst.BaseSuite,
-        hint: cst.SimpleStatementLine,
+        hint: cst.AnnAssign,
     ) -> cst.BaseSuite:
         for member in body.body:
             if m.matches(
                 member,
-                m.SimpleStatementLine(body=[m.AnnAssign(value=hint.body[0].value)]),
+                m.AnnAssign(value=m.Name(hint.target.value)),
             ):
                 if self.overwrite_existing_annotations:
-                    member = member.with_changes(body=[hint])
+                    member = member.with_changes(annotation=hint.annotation)
                 return body
 
-        return body.with_changes(body=(hint, *body.body))
+        return body.with_changes(body=(cst.SimpleStatementLine(body=[hint]), *body.body))
 
     # private methods used in the visit and leave methods
 
@@ -1289,15 +1290,16 @@ class ApplyTypeAnnotationsVisitor(ContextAwareTransformer):
                 updated_node = updated_node.with_changes(bases=new_bases)
 
             if self.create_class_attributes:
-                hint_matcher = m.SimpleStatementLine(body=[m.AnnAssign()])
-                hints = filter(
+                hint_matcher = m.AnnAssign(target=m.Name())
+                flt_stmts = (b for body in definition.body.body for b in body.body)
+                attr_hints = list(filter(
                     lambda attr: m.matches(attr, hint_matcher),
-                    (line for line in definition.body.body),
-                )
+                    flt_stmts,
+                ))
 
                 updated_node = updated_node.with_changes(
                     body=functools.reduce(
-                        self._add_annotated_attr_to_class_body, hints, updated_node.body
+                        self._add_annotated_attr_to_class_body, attr_hints, updated_node.body
                     )
                 )
 
