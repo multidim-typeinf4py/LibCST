@@ -420,9 +420,7 @@ class TypeCollector(m.MatcherDecoratableVisitor):
                 ]
             )
             hints: list[cst.AnnAssign] = [
-                ssl
-                for ssl in node.body.body
-                if m.matches(ssl, matcher)
+                ssl for ssl in node.body.body if m.matches(ssl, matcher)
             ]
 
         else:
@@ -498,7 +496,9 @@ class TypeCollector(m.MatcherDecoratableVisitor):
         original_node: cst.Assign,
     ) -> None:
         self.current_assign = None
-        self.qualifier.pop()
+
+        if self.qualifier:
+            self.qualifier.pop()
 
     @m.call_if_inside(m.Assign())
     @m.visit(m.Call(func=m.Name("TypeVar")))
@@ -870,14 +870,18 @@ class ApplyTypeAnnotationsVisitor(ContextAwareTransformer):
                 self.always_qualify_annotations or always_qualify_annotations
             )
             module_imports = self._get_module_imports(stub, import_gatherer)
-            visitor = TypeCollector(existing_import_names, module_imports, self.context)
+            visitor = TypeCollector(
+                existing_import_names,
+                module_imports,
+                self.context,
+            )
             cst.MetadataWrapper(stub).visit(visitor)
             self.annotations.update(visitor.annotations)
 
-            if self.use_future_annotations:
-                AddImportsVisitor.add_needed_import(
-                    self.context, "__future__", "annotations"
-                )
+        if self.use_future_annotations:
+            AddImportsVisitor.add_needed_import(
+                self.context, "__future__", "annotations"
+            )
 
         tree_with_imports = AddImportsVisitor(self.context).transform_module(tree)
         tree_with_changes = tree_with_imports.visit(self)
@@ -1034,7 +1038,9 @@ class ApplyTypeAnnotationsVisitor(ContextAwareTransformer):
                     member = member.with_changes(annotation=hint.annotation)
                 return body
 
-        return body.with_changes(body=(cst.SimpleStatementLine(body=[hint]), *body.body))
+        return body.with_changes(
+            body=(cst.SimpleStatementLine(body=[hint]), *body.body)
+        )
 
     # private methods used in the visit and leave methods
 
@@ -1292,14 +1298,18 @@ class ApplyTypeAnnotationsVisitor(ContextAwareTransformer):
             if self.create_class_attributes:
                 hint_matcher = m.AnnAssign(target=m.Name())
                 flt_stmts = (b for body in definition.body.body for b in body.body)
-                attr_hints = list(filter(
-                    lambda attr: m.matches(attr, hint_matcher),
-                    flt_stmts,
-                ))
+                attr_hints = list(
+                    filter(
+                        lambda attr: m.matches(attr, hint_matcher),
+                        flt_stmts,
+                    )
+                )
 
                 updated_node = updated_node.with_changes(
                     body=functools.reduce(
-                        self._add_annotated_attr_to_class_body, attr_hints, updated_node.body
+                        self._add_annotated_attr_to_class_body,
+                        attr_hints,
+                        updated_node.body,
                     )
                 )
 
