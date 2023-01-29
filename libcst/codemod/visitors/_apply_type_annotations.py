@@ -1036,8 +1036,10 @@ class ApplyTypeAnnotationsVisitor(ContextAwareTransformer):
             ):
                 if self.overwrite_existing_annotations:
                     member = member.with_changes(annotation=hint.annotation)
+                    self.annotation_counts.attribute_annotations += 1
                 return body
 
+        self.annotation_counts.attribute_annotations += 1
         return body.with_changes(
             body=(cst.SimpleStatementLine(body=[hint]), *body.body)
         )
